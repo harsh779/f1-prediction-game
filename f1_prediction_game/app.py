@@ -18,6 +18,12 @@ f1_data = F1Data()
 # Initialize session state
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'page' not in st.session_state:
+    st.session_state.page = 'home'
+if 'show_success' not in st.session_state:
+    st.session_state.show_success = False
+if 'registration_success' not in st.session_state:
+    st.session_state.registration_success = False
 
 # Cache F1 data
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
@@ -47,26 +53,53 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
-
-def login_user(username: str, password: str) -> bool:
-    db = get_db()
-    user = db.query(models.User).filter(models.User.username == username).first()
-    if user and verify_password(password, user.hashed_password):
-        st.session_state.user = user
-        return True
-    return False
-
-def register_user(username: str, email: str, password: str) -> bool:
-    db = get_db()
-    if db.query(models.User).filter(models.User.username == username).first():
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception as e:
+        st.error(f"Password verification error: {str(e)}")
         return False
-    
-    hashed_password = hash_password(password)
-    user = models.User(username=username, email=email, hashed_password=hashed_password)
-    db.add(user)
-    db.commit()
-    return True
+
+def login_user(email: str, password: str) -> bool:
+    try:
+        db = get_db()
+        user = db.query(models.User).filter(models.User.email == email).first()
+        
+        if not user:
+            st.error("User not found")
+            return False
+            
+        if verify_password(password, user.password):
+            st.session_state.user = user
+            return True
+        else:
+            st.error("Invalid password")
+            return False
+    except Exception as e:
+        st.error(f"Login error: {str(e)}")
+        return False
+    finally:
+        db.close()
+
+def register_user(email: str, password: str, name: str) -> bool:
+    try:
+        db = get_db()
+        # Check if user already exists
+        existing_user = db.query(models.User).filter(models.User.email == email).first()
+        if existing_user:
+            st.error("Email already registered")
+            return False
+        
+        # Create new user
+        hashed_password = hash_password(password)
+        new_user = models.User(email=email, password=hashed_password, name=name)
+        db.add(new_user)
+        db.commit()
+        return True
+    except Exception as e:
+        st.error(f"Registration error: {str(e)}")
+        return False
+    finally:
+        db.close()
 
 def create_prediction(
     user_id: int,
@@ -154,186 +187,75 @@ def calculate_points(prediction: models.Prediction, result: models.RaceResult) -
     
     return points
 
-def main():
-    st.title("F1 Prediction Game")
+# Page config
+st.set_page_config(
+    page_title="F1 Prediction Game",
+    page_icon="🏎️",
+    layout="wide"
+)
+
+# Navigation
+def show_navigation():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+            <div style='text-align: center; padding: 1rem;'>
+                <h1>🏎️ F1 Prediction Game</h1>
+            </div>
+        """, unsafe_allow_html=True)
     
-    # Sidebar for navigation
-    menu = st.sidebar.selectbox(
-        "Menu",
-        ["Login", "Register", "Make Prediction", "Leaderboard", "My Predictions"]
-    )
+    if st.session_state.user:
+        with col3:
+            if st.button("Logout"):
+                st.session_state.user = None
+                st.session_state.page = 'home'
+                st.rerun()
+
+# Home page
+def show_home():
+    st.markdown("""
+        <div style='text-align: center; padding: 2rem;'>
+            <h2>Welcome to the F1 Prediction Game!</h2>
+            <p>Predict race results and compete with friends!</p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    if menu == "Login":
-        st.header("Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            if login_user(username, password):
-                st.success("Logged in successfully!")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid username or password")
+    col1, col2 = st.columns(2)
     
-    elif menu == "Register":
-        st.header("Register")
-        username = st.text_input("Username")
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        if st.button("Register"):
-            if register_user(username, email, password):
-                st.success("Registration successful! Please login.")
-            else:
-                st.error("Username already exists")
+    with col1:
+        st.markdown("### Login")
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Login", key="login_button"):
+            if not email or not password:
+                st.error("Please enter both email and password")
+                return
+            if login_user(email, password):
+                st.session_state.show_success = True
+                st.rerun()
     
-    elif menu == "Make Prediction":
-        if not st.session_state.user:
-            st.warning("Please login first")
-            return
-        
-        st.header("Make Prediction")
-        
-        # Get F1 data
-        f1_data_cache = get_cached_f1_data()
-        races = f1_data_cache['races']
-        drivers = f1_data_cache['drivers']
-        constructors = f1_data_cache['constructors']
-        
-        if not races:
-            st.warning("No upcoming races available")
-            return
-        
-        # Race selection with more details
-        st.subheader("Select Race")
-        selected_race = None
-        
-        # Create a clean race selection interface
-        race_options = {f"{race['name']} - {race['date']}": race for race in races}
-        selected_race_name = st.selectbox("Choose a race to predict:", options=list(race_options.keys()))
-        selected_race = race_options[selected_race_name]
-        
-        # Show race details
-        st.write(f"**Circuit:** {selected_race['circuit']}")
-        st.write(f"**Country:** {selected_race['country']}")
-        st.write("---")
-        
-        # Driver predictions
-        st.subheader("Driver Predictions")
-        st.write("Select your predicted finishing positions:")
-        
-        driver_options = {f"{driver['name']} (#{driver['number']})": driver['id'] for driver in drivers}
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Top 3 Positions**")
-            drivers = {
-                'p1': st.selectbox("1st Place", options=list(driver_options.keys())),
-                'p2': st.selectbox("2nd Place", options=list(driver_options.keys())),
-                'p3': st.selectbox("3rd Place", options=list(driver_options.keys()))
-            }
-        
-        with col2:
-            st.write("**Other Positions**")
-            drivers.update({
-                'p10': st.selectbox("10th Place", options=list(driver_options.keys())),
-                'p11': st.selectbox("11th Place", options=list(driver_options.keys())),
-                'p19': st.selectbox("19th Place", options=list(driver_options.keys())),
-                'p20': st.selectbox("20th Place", options=list(driver_options.keys()))
-            })
-        
-        # Constructor predictions
-        st.subheader("Constructor Predictions")
-        st.write("Select your predicted constructor finishing positions:")
-        
-        constructor_options = {constructor['name']: constructor['id'] for constructor in constructors}
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            constructors = {
-                'p1': st.selectbox("1st Place Constructor", options=list(constructor_options.keys())),
-                'p2': st.selectbox("2nd Place Constructor", options=list(constructor_options.keys()))
-            }
-        
-        with col2:
-            constructors.update({
-                'p5': st.selectbox("5th Place Constructor", options=list(constructor_options.keys())),
-                'p6': st.selectbox("6th Place Constructor", options=list(constructor_options.keys())),
-                'p10': st.selectbox("10th Place Constructor", options=list(constructor_options.keys()))
-            })
-        
-        # Wildcard predictions
-        st.subheader("Wildcard Predictions")
-        st.write("Make your wildcard predictions for extra points:")
-        
-        wildcards = {
-            'biggest_loser': st.selectbox("Biggest Position Loser", options=list(driver_options.keys())),
-            'sprint_biggest_loser': st.selectbox("Sprint Race Biggest Loser", options=list(driver_options.keys())),
-            'sprint_biggest_gainer': st.selectbox("Sprint Race Biggest Gainer", options=list(driver_options.keys()))
-        }
-        
-        if st.button("Submit Prediction"):
-            # Convert selections to IDs
-            drivers = {k: driver_options[v] for k, v in drivers.items()}
-            constructors = {k: constructor_options[v] for k, v in constructors.items()}
-            wildcards = {k: driver_options[v] for k, v in wildcards.items()}
-            
-            prediction = create_prediction(
-                st.session_state.user.id,
-                int(selected_race['id']),
-                drivers,
-                constructors,
-                wildcards
-            )
-            st.success("Prediction submitted successfully!")
-    
-    elif menu == "Leaderboard":
-        st.header("Leaderboard")
-        db = get_db()
-        users = db.query(models.User).order_by(models.User.total_points.desc()).all()
-        
-        leaderboard_data = []
-        for user in users:
-            leaderboard_data.append({
-                "Username": user.username,
-                "Total Points": user.total_points
-            })
-        
-        st.table(pd.DataFrame(leaderboard_data))
-    
-    elif menu == "My Predictions":
-        if not st.session_state.user:
-            st.warning("Please login first")
-            return
-        
-        st.header("My Predictions")
-        db = get_db()
-        predictions = db.query(models.Prediction).filter(
-            models.Prediction.user_id == st.session_state.user.id
-        ).all()
-        
-        if predictions:
-            for prediction in predictions:
-                st.subheader(f"Race {prediction.race_id}")
-                st.write(f"P1 Driver: {prediction.p1_driver}")
-                st.write(f"P2 Driver: {prediction.p2_driver}")
-                st.write(f"P3 Driver: {prediction.p3_driver}")
-                st.write("---")
-        else:
-            st.info("No predictions made yet")
+    with col2:
+        st.markdown("### Register")
+        reg_email = st.text_input("Email", key="reg_email")
+        reg_password = st.text_input("Password", type="password", key="reg_password")
+        reg_name = st.text_input("Name", key="reg_name")
+        if st.button("Register", key="register_button"):
+            if not reg_email or not reg_password or not reg_name:
+                st.error("Please fill in all registration fields")
+                return
+            if register_user(reg_email, reg_password, reg_name):
+                st.session_state.registration_success = True
+                st.rerun()
 
 # Predictions page
 def show_predictions():
     st.markdown(f"### Welcome, {st.session_state.user.name}!")
     
     # Get F1 data
-    st.write("Debug: Getting F1 data...")
     f1_data = get_cached_f1_data()
     races = f1_data['races']
     drivers = f1_data['drivers']
     constructors = f1_data['constructors']
-    
-    # Debug output
-    st.write(f"Debug - Number of races: {len(races)}")
-    st.write(f"Debug - First race: {races[0] if races else 'No races'}")
     
     # Race selection
     st.markdown("### Select Race")
@@ -343,17 +265,19 @@ def show_predictions():
         
     # Create race options
     race_options = [f"{race['name']} ({race['date']})" for race in races]
-    st.write(f"Debug - Available races: {race_options}")
-    
     selected_race_name = st.selectbox("Choose a race", options=race_options)
     
     # Get selected race details
     selected_race = next(race for race in races if f"{race['name']} ({race['date']})" == selected_race_name)
     
-    st.markdown(f"**{selected_race['name']}**")
-    st.write(f"Circuit: {selected_race['circuit']}")
-    st.write(f"Country: {selected_race['country']}")
-    st.write("---")
+    # Display race details in a cleaner format
+    st.markdown(f"""
+        ### {selected_race['name']}
+        **Circuit:** {selected_race['circuit']}  
+        **Country:** {selected_race['country']}  
+        **Date:** {selected_race['date']}
+    """)
+    st.markdown("---")
     
     # Driver predictions
     st.markdown("### Driver Predictions")
@@ -432,6 +356,52 @@ def show_predictions():
             db.add(new_prediction)
             db.commit()
             st.success("Prediction submitted successfully!")
+
+# Leaderboard page
+def show_leaderboard():
+    st.markdown("### Leaderboard")
+    
+    with Session(engine) as db:
+        users = db.query(models.User).all()
+        leaderboard_data = []
+        
+        for user in users:
+            predictions = db.query(models.Prediction).filter(models.Prediction.user_id == user.id).all()
+            total_points = sum(pred.points for pred in predictions)
+            leaderboard_data.append({
+                'Name': user.name,
+                'Points': total_points,
+                'Predictions': len(predictions)
+            })
+        
+        if leaderboard_data:
+            df = pd.DataFrame(leaderboard_data)
+            df = df.sort_values('Points', ascending=False)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No predictions have been made yet.")
+
+# Main app
+def main():
+    show_navigation()
+    
+    # Show success messages if needed
+    if st.session_state.show_success:
+        st.success("Login successful!")
+        st.session_state.show_success = False
+    
+    if st.session_state.registration_success:
+        st.success("Registration successful! Please login.")
+        st.session_state.registration_success = False
+    
+    if st.session_state.user:
+        tab1, tab2 = st.tabs(["Make Prediction", "Leaderboard"])
+        with tab1:
+            show_predictions()
+        with tab2:
+            show_leaderboard()
+    else:
+        show_home()
 
 if __name__ == "__main__":
     main() 
