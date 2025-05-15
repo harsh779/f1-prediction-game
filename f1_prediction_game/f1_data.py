@@ -63,9 +63,11 @@ class F1Data:
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
-            standings = data['MRData']['StandingsTable']['StandingsLists'][0]['DriverStandings']
-            return {
-                standing['Driver']['driverId']: standing['Constructors'][0]['constructorId']
-                for standing in standings
-            }
+            standings_lists = data['MRData']['StandingsTable']['StandingsLists']
+            if standings_lists:  # Only proceed if standings exist
+                standings = standings_lists[0]['DriverStandings']
+                return {
+                    standing['Driver']['driverId']: standing['Constructors'][0]['constructorId']
+                    for standing in standings
+                }
         return {} 

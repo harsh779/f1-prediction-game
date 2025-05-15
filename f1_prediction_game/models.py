@@ -32,7 +32,7 @@ class Prediction(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    race_id = Column(Integer)
+    race_id = Column(Integer, ForeignKey("races.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Driver predictions
