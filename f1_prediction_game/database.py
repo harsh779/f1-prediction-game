@@ -3,22 +3,27 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Check if running on Streamlit Cloud
-if os.getenv('STREAMLIT_SERVER_RUNNING'):
-    # Use PostgreSQL for Streamlit Cloud
-    DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/f1_prediction')
-else:
-    # Use SQLite for local development
-    DATABASE_URL = "sqlite:///f1_predictions.db"
+# Use SQLite for both local and Streamlit Cloud
+DATABASE_URL = "sqlite:///f1_predictions.db"
 
-# Create engine
-engine = create_engine(DATABASE_URL)
+# Create engine with proper SQLite configuration
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
 
 # Create session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create base class
 Base = declarative_base()
+
+# Initialize database
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+# Call init_db when the module is imported
+init_db()
 
 # Dependency
 def get_db():

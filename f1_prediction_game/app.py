@@ -236,16 +236,26 @@ def show_home():
     
     with col2:
         st.markdown("### Register")
-        reg_email = st.text_input("Email", key="reg_email")
-        reg_password = st.text_input("Password", type="password", key="reg_password")
-        reg_name = st.text_input("Name", key="reg_name")
-        if st.button("Register", key="register_button"):
-            if not reg_email or not reg_password or not reg_name:
-                st.error("Please fill in all registration fields")
-                return
-            if register_user(reg_email, reg_password, reg_name):
-                st.session_state.registration_success = True
-                st.rerun()
+        # Registration form
+        with st.form("register_form", clear_on_submit=True):
+            email = st.text_input("Email", key="register_email")
+            password = st.text_input("Password", type="password", key="register_password")
+            name = st.text_input("Name", key="register_name")
+            submit = st.form_submit_button("Register")
+            
+            if submit:
+                if not email or not password or not name:
+                    st.error("Please fill in all registration fields")
+                else:
+                    try:
+                        if register_user(email, password, name):
+                            st.success("Registration successful! Please log in.")
+                            st.session_state.registration_success = True
+                            st.rerun()
+                        else:
+                            st.error("Registration failed. Please try again.")
+                    except Exception as e:
+                        st.error(f"Registration error: {str(e)}")
 
 # Predictions page
 def show_predictions():
