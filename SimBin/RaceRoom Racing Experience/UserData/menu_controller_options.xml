@@ -1,0 +1,10 @@
+<game__MenuControllerOptions ID="/options/menu_controller_options">
+  <latestVersion type="uint32">1</latestVersion>
+  <controllerSupportEnabled type="bool">true</controllerSupportEnabled>
+  <mouseSpeed type="float32">500.00000000</mouseSpeed>
+  <deadZone type="float32">7000.00000000</deadZone>
+  <sensitivity type="float32">1.00000000</sensitivity>
+  <useSmoothDelta type="bool">true</useSmoothDelta>
+  <disabledDevices>
+  </disabledDevices>
+</game__MenuControllerOptions>
