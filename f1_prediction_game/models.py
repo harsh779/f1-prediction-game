@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from database import Base
 from datetime import datetime
 
 Base = declarative_base()
@@ -12,7 +13,7 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    total_points = Column(Float, default=0)
+    total_points = Column(Float, default=0.0)
     predictions = relationship("Prediction", back_populates="user")
 
 class Race(Base):
@@ -31,8 +32,8 @@ class Prediction(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    race_id = Column(Integer, ForeignKey("races.id"))
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    race_id = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     # Driver predictions
     p1_driver = Column(String)
@@ -59,7 +60,7 @@ class Prediction(Base):
     driver_champion = Column(String)
     constructor_champion = Column(String)
     
-    points = Column(Float, default=0)
+    points = Column(Float, default=0.0)
     user = relationship("User", back_populates="predictions")
     race = relationship("Race", back_populates="predictions")
 

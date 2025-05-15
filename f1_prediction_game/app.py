@@ -7,13 +7,27 @@ import models
 from sqlalchemy.orm import Session
 import bcrypt
 from typing import List
+from f1_data import F1Data
 
 # Initialize database
 models.Base.metadata.create_all(bind=engine)
 
+# Initialize F1 data fetcher
+f1_data = F1Data()
+
 # Initialize session state
 if 'user' not in st.session_state:
     st.session_state.user = None
+
+# Cache F1 data
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_cached_f1_data():
+    return {
+        'races': f1_data.get_upcoming_races(),
+        'drivers': f1_data.get_drivers(),
+        'constructors': f1_data.get_constructors(),
+        'driver_constructor_map': f1_data.get_driver_constructor_mapping()
+    }
 
 def get_db():
     db = SessionLocal()
@@ -171,58 +185,69 @@ def main():
         
         st.header("Make Prediction")
         
-        # Get available races
-        db = get_db()
-        races = db.query(models.Race).filter(models.Race.practice1_start > datetime.now()).all()
+        # Get F1 data
+        f1_data_cache = get_cached_f1_data()
+        races = f1_data_cache['races']
+        drivers = f1_data_cache['drivers']
+        constructors = f1_data_cache['constructors']
         
         if not races:
             st.warning("No upcoming races available")
             return
         
-        race = st.selectbox("Select Race", races, format_func=lambda x: x.name)
+        # Race selection
+        race_options = {f"{race['name']} ({race['date']})": race for race in races}
+        selected_race = st.selectbox("Select Race", options=list(race_options.keys()))
+        race = race_options[selected_race]
         
         # Driver predictions
         st.subheader("Driver Predictions")
+        driver_options = {f"{driver['name']} (#{driver['number']})": driver['id'] for driver in drivers}
+        
         drivers = {
-            'p1': st.text_input("1st Place Driver"),
-            'p2': st.text_input("2nd Place Driver"),
-            'p3': st.text_input("3rd Place Driver"),
-            'p10': st.text_input("10th Place Driver"),
-            'p11': st.text_input("11th Place Driver"),
-            'p19': st.text_input("19th Place Driver"),
-            'p20': st.text_input("20th Place Driver")
+            'p1': st.selectbox("1st Place Driver", options=list(driver_options.keys())),
+            'p2': st.selectbox("2nd Place Driver", options=list(driver_options.keys())),
+            'p3': st.selectbox("3rd Place Driver", options=list(driver_options.keys())),
+            'p10': st.selectbox("10th Place Driver", options=list(driver_options.keys())),
+            'p11': st.selectbox("11th Place Driver", options=list(driver_options.keys())),
+            'p19': st.selectbox("19th Place Driver", options=list(driver_options.keys())),
+            'p20': st.selectbox("20th Place Driver", options=list(driver_options.keys()))
         }
         
         # Constructor predictions
         st.subheader("Constructor Predictions")
+        constructor_options = {constructor['name']: constructor['id'] for constructor in constructors}
+        
         constructors = {
-            'p1': st.text_input("1st Place Constructor"),
-            'p2': st.text_input("2nd Place Constructor"),
-            'p5': st.text_input("5th Place Constructor"),
-            'p6': st.text_input("6th Place Constructor"),
-            'p10': st.text_input("10th Place Constructor")
+            'p1': st.selectbox("1st Place Constructor", options=list(constructor_options.keys())),
+            'p2': st.selectbox("2nd Place Constructor", options=list(constructor_options.keys())),
+            'p5': st.selectbox("5th Place Constructor", options=list(constructor_options.keys())),
+            'p6': st.selectbox("6th Place Constructor", options=list(constructor_options.keys())),
+            'p10': st.selectbox("10th Place Constructor", options=list(constructor_options.keys()))
         }
         
         # Wildcard predictions
         st.subheader("Wildcard Predictions")
         wildcards = {
-            'biggest_loser': st.text_input("Biggest Position Loser"),
-            'sprint_biggest_loser': st.text_input("Sprint Race Biggest Loser"),
-            'sprint_biggest_gainer': st.text_input("Sprint Race Biggest Gainer")
+            'biggest_loser': st.selectbox("Biggest Position Loser", options=list(driver_options.keys())),
+            'sprint_biggest_loser': st.selectbox("Sprint Race Biggest Loser", options=list(driver_options.keys())),
+            'sprint_biggest_gainer': st.selectbox("Sprint Race Biggest Gainer", options=list(driver_options.keys()))
         }
         
         if st.button("Submit Prediction"):
-            if all(drivers.values()) and all(constructors.values()):
-                prediction = create_prediction(
-                    st.session_state.user.id,
-                    race.id,
-                    drivers,
-                    constructors,
-                    wildcards
-                )
-                st.success("Prediction submitted successfully!")
-            else:
-                st.error("Please fill in all required fields")
+            # Convert selections to IDs
+            drivers = {k: driver_options[v] for k, v in drivers.items()}
+            constructors = {k: constructor_options[v] for k, v in constructors.items()}
+            wildcards = {k: driver_options[v] for k, v in wildcards.items()}
+            
+            prediction = create_prediction(
+                st.session_state.user.id,
+                int(race['id']),
+                drivers,
+                constructors,
+                wildcards
+            )
+            st.success("Prediction submitted successfully!")
     
     elif menu == "Leaderboard":
         st.header("Leaderboard")
@@ -249,33 +274,15 @@ def main():
             models.Prediction.user_id == st.session_state.user.id
         ).all()
         
-        if not predictions:
+        if predictions:
+            for prediction in predictions:
+                st.subheader(f"Race {prediction.race_id}")
+                st.write(f"P1 Driver: {prediction.p1_driver}")
+                st.write(f"P2 Driver: {prediction.p2_driver}")
+                st.write(f"P3 Driver: {prediction.p3_driver}")
+                st.write("---")
+        else:
             st.info("No predictions made yet")
-            return
-        
-        for pred in predictions:
-            st.subheader(f"Race: {pred.race.name}")
-            st.write(f"Points: {pred.points}")
-            st.write("Driver Predictions:")
-            st.write(f"P1: {pred.p1_driver}")
-            st.write(f"P2: {pred.p2_driver}")
-            st.write(f"P3: {pred.p3_driver}")
-            st.write(f"P10: {pred.p10_driver}")
-            st.write(f"P11: {pred.p11_driver}")
-            st.write(f"P19: {pred.p19_driver}")
-            st.write(f"P20: {pred.p20_driver}")
-            st.write("Constructor Predictions:")
-            st.write(f"P1: {pred.p1_constructor}")
-            st.write(f"P2: {pred.p2_constructor}")
-            st.write(f"P5: {pred.p5_constructor}")
-            st.write(f"P6: {pred.p6_constructor}")
-            st.write(f"P10: {pred.p10_constructor}")
-            st.write("Wildcard Predictions:")
-            st.write(f"Biggest Loser: {pred.biggest_loser}")
-            if pred.race.is_sprint:
-                st.write(f"Sprint Biggest Loser: {pred.sprint_biggest_loser}")
-                st.write(f"Sprint Biggest Gainer: {pred.sprint_biggest_gainer}")
-            st.markdown("---")
 
 if __name__ == "__main__":
     main() 
