@@ -20,14 +20,21 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 
 # Cache F1 data
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def get_cached_f1_data():
+    st.write("Debug: Fetching F1 data")
+    races = f1_data.get_upcoming_races()
+    drivers = f1_data.get_drivers()
+    constructors = f1_data.get_constructors()
+    st.write(f"Debug: Fetched {len(races)} races, {len(drivers)} drivers, {len(constructors)} constructors")
     return {
-        'races': f1_data.get_upcoming_races(),
-        'drivers': f1_data.get_drivers(),
-        'constructors': f1_data.get_constructors(),
-        'driver_constructor_map': f1_data.get_driver_constructor_mapping()
+        'races': races,
+        'drivers': drivers,
+        'constructors': constructors
     }
+
+# Clear cache on app start
+get_cached_f1_data.clear()
 
 def get_db():
     db = SessionLocal()
@@ -195,39 +202,68 @@ def main():
             st.warning("No upcoming races available")
             return
         
-        # Race selection
-        race_options = {f"{race['name']} ({race['date']})": race for race in races}
-        selected_race = st.selectbox("Select Race", options=list(race_options.keys()))
-        race = race_options[selected_race]
+        # Race selection with more details
+        st.subheader("Select Race")
+        selected_race = None
+        
+        # Create a clean race selection interface
+        race_options = {f"{race['name']} - {race['date']}": race for race in races}
+        selected_race_name = st.selectbox("Choose a race to predict:", options=list(race_options.keys()))
+        selected_race = race_options[selected_race_name]
+        
+        # Show race details
+        st.write(f"**Circuit:** {selected_race['circuit']}")
+        st.write(f"**Country:** {selected_race['country']}")
+        st.write("---")
         
         # Driver predictions
         st.subheader("Driver Predictions")
+        st.write("Select your predicted finishing positions:")
+        
         driver_options = {f"{driver['name']} (#{driver['number']})": driver['id'] for driver in drivers}
         
-        drivers = {
-            'p1': st.selectbox("1st Place Driver", options=list(driver_options.keys())),
-            'p2': st.selectbox("2nd Place Driver", options=list(driver_options.keys())),
-            'p3': st.selectbox("3rd Place Driver", options=list(driver_options.keys())),
-            'p10': st.selectbox("10th Place Driver", options=list(driver_options.keys())),
-            'p11': st.selectbox("11th Place Driver", options=list(driver_options.keys())),
-            'p19': st.selectbox("19th Place Driver", options=list(driver_options.keys())),
-            'p20': st.selectbox("20th Place Driver", options=list(driver_options.keys()))
-        }
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Top 3 Positions**")
+            drivers = {
+                'p1': st.selectbox("1st Place", options=list(driver_options.keys())),
+                'p2': st.selectbox("2nd Place", options=list(driver_options.keys())),
+                'p3': st.selectbox("3rd Place", options=list(driver_options.keys()))
+            }
+        
+        with col2:
+            st.write("**Other Positions**")
+            drivers.update({
+                'p10': st.selectbox("10th Place", options=list(driver_options.keys())),
+                'p11': st.selectbox("11th Place", options=list(driver_options.keys())),
+                'p19': st.selectbox("19th Place", options=list(driver_options.keys())),
+                'p20': st.selectbox("20th Place", options=list(driver_options.keys()))
+            })
         
         # Constructor predictions
         st.subheader("Constructor Predictions")
+        st.write("Select your predicted constructor finishing positions:")
+        
         constructor_options = {constructor['name']: constructor['id'] for constructor in constructors}
         
-        constructors = {
-            'p1': st.selectbox("1st Place Constructor", options=list(constructor_options.keys())),
-            'p2': st.selectbox("2nd Place Constructor", options=list(constructor_options.keys())),
-            'p5': st.selectbox("5th Place Constructor", options=list(constructor_options.keys())),
-            'p6': st.selectbox("6th Place Constructor", options=list(constructor_options.keys())),
-            'p10': st.selectbox("10th Place Constructor", options=list(constructor_options.keys()))
-        }
+        col1, col2 = st.columns(2)
+        with col1:
+            constructors = {
+                'p1': st.selectbox("1st Place Constructor", options=list(constructor_options.keys())),
+                'p2': st.selectbox("2nd Place Constructor", options=list(constructor_options.keys()))
+            }
+        
+        with col2:
+            constructors.update({
+                'p5': st.selectbox("5th Place Constructor", options=list(constructor_options.keys())),
+                'p6': st.selectbox("6th Place Constructor", options=list(constructor_options.keys())),
+                'p10': st.selectbox("10th Place Constructor", options=list(constructor_options.keys()))
+            })
         
         # Wildcard predictions
         st.subheader("Wildcard Predictions")
+        st.write("Make your wildcard predictions for extra points:")
+        
         wildcards = {
             'biggest_loser': st.selectbox("Biggest Position Loser", options=list(driver_options.keys())),
             'sprint_biggest_loser': st.selectbox("Sprint Race Biggest Loser", options=list(driver_options.keys())),
@@ -242,7 +278,7 @@ def main():
             
             prediction = create_prediction(
                 st.session_state.user.id,
-                int(race['id']),
+                int(selected_race['id']),
                 drivers,
                 constructors,
                 wildcards
@@ -283,6 +319,119 @@ def main():
                 st.write("---")
         else:
             st.info("No predictions made yet")
+
+# Predictions page
+def show_predictions():
+    st.markdown(f"### Welcome, {st.session_state.user.name}!")
+    
+    # Get F1 data
+    st.write("Debug: Getting F1 data...")
+    f1_data = get_cached_f1_data()
+    races = f1_data['races']
+    drivers = f1_data['drivers']
+    constructors = f1_data['constructors']
+    
+    # Debug output
+    st.write(f"Debug - Number of races: {len(races)}")
+    st.write(f"Debug - First race: {races[0] if races else 'No races'}")
+    
+    # Race selection
+    st.markdown("### Select Race")
+    if not races:
+        st.error("No races available")
+        return
+        
+    # Create race options
+    race_options = [f"{race['name']} ({race['date']})" for race in races]
+    st.write(f"Debug - Available races: {race_options}")
+    
+    selected_race_name = st.selectbox("Choose a race", options=race_options)
+    
+    # Get selected race details
+    selected_race = next(race for race in races if f"{race['name']} ({race['date']})" == selected_race_name)
+    
+    st.markdown(f"**{selected_race['name']}**")
+    st.write(f"Circuit: {selected_race['circuit']}")
+    st.write(f"Country: {selected_race['country']}")
+    st.write("---")
+    
+    # Driver predictions
+    st.markdown("### Driver Predictions")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### Top 3")
+        p1 = st.selectbox("1st Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        p2 = st.selectbox("2nd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        p3 = st.selectbox("3rd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+    
+    with col2:
+        st.markdown("#### Other Positions")
+        p4 = st.selectbox("4th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        p5 = st.selectbox("5th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        p6 = st.selectbox("6th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+    
+    # Constructor predictions
+    st.markdown("### Constructor Predictions")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### Top 3")
+        c1 = st.selectbox("1st Place", options=constructors, format_func=lambda x: x['name'])
+        c2 = st.selectbox("2nd Place", options=constructors, format_func=lambda x: x['name'])
+        c3 = st.selectbox("3rd Place", options=constructors, format_func=lambda x: x['name'])
+    
+    with col2:
+        st.markdown("#### Other Positions")
+        c4 = st.selectbox("4th Place", options=constructors, format_func=lambda x: x['name'])
+        c5 = st.selectbox("5th Place", options=constructors, format_func=lambda x: x['name'])
+        c6 = st.selectbox("6th Place", options=constructors, format_func=lambda x: x['name'])
+    
+    # Wildcard predictions
+    st.markdown("### Wildcard Predictions")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fastest_lap = st.selectbox("Fastest Lap", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+    
+    with col2:
+        dnf = st.selectbox("First DNF", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+    
+    # Submit prediction
+    if st.button("Submit Prediction"):
+        prediction = {
+            'race_id': selected_race['id'],
+            'driver_predictions': {
+                'p1': p1['id'],
+                'p2': p2['id'],
+                'p3': p3['id'],
+                'p4': p4['id'],
+                'p5': p5['id'],
+                'p6': p6['id']
+            },
+            'constructor_predictions': {
+                'c1': c1['id'],
+                'c2': c2['id'],
+                'c3': c3['id'],
+                'c4': c4['id'],
+                'c5': c5['id'],
+                'c6': c6['id']
+            },
+            'wildcard_predictions': {
+                'fastest_lap': fastest_lap['id'],
+                'dnf': dnf['id']
+            }
+        }
+        
+        with Session(engine) as db:
+            new_prediction = models.Prediction(
+                user_id=st.session_state.user.id,
+                race_id=selected_race['id'],
+                predictions=json.dumps(prediction)
+            )
+            db.add(new_prediction)
+            db.commit()
+            st.success("Prediction submitted successfully!")
 
 if __name__ == "__main__":
     main() 
