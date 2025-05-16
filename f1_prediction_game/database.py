@@ -20,10 +20,8 @@ Base = declarative_base()
 
 # Initialize database
 def init_db():
+    # Create all tables
     Base.metadata.create_all(bind=engine)
-
-# Call init_db when the module is imported
-init_db()
 
 # Dependency
 def get_db():

@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from database import Base
 from datetime import datetime
 
 Base = declarative_base()
@@ -34,9 +33,35 @@ class Prediction(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     race_id = Column(Integer, ForeignKey("races.id"))
-    predictions = Column(JSON)
+    
+    # Driver positions
+    p1_driver = Column(String)
+    p2_driver = Column(String)
+    p3_driver = Column(String)
+    p10_driver = Column(String)
+    p11_driver = Column(String)
+    p19_driver = Column(String)
+    p20_driver = Column(String)
+    
+    # Constructor positions
+    p1_constructor = Column(String)
+    p2_constructor = Column(String)
+    p5_constructor = Column(String)
+    p6_constructor = Column(String)
+    p10_constructor = Column(String)
+    
+    # Wildcard predictions
+    biggest_loser = Column(String)
+    sprint_biggest_loser = Column(String)
+    sprint_biggest_gainer = Column(String)
+    
+    # Winner predictions
+    race_winner = Column(String)
+    constructor_winner = Column(String)
+    
     points = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
     user = relationship("User", back_populates="predictions")
     race = relationship("Race", back_populates="predictions")
 

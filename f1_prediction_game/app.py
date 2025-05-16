@@ -160,6 +160,7 @@ def calculate_points(prediction: models.Prediction, result: models.RaceResult) -
     for driver, pred_pos in driver_positions.items():
         if driver in actual_positions:
             actual_pos = actual_positions[driver]
+            # New rule: +2 for exact match, -abs(difference) for mismatch
             points += 2 if pred_pos == actual_pos else -abs(pred_pos - actual_pos)
     
     # Constructor points
@@ -172,9 +173,11 @@ def calculate_points(prediction: models.Prediction, result: models.RaceResult) -
         prediction.p10_constructor: 10
     }
     
+    # Calculate constructor points based on sum of driver positions
     for constructor, pred_pos in constructor_predictions.items():
         if constructor in constructor_results:
             actual_pos = constructor_results[constructor]
+            # Same scoring rule as drivers: +2 for exact match, -abs(difference) for mismatch
             points += 2 if pred_pos == actual_pos else -abs(pred_pos - actual_pos)
     
     # Wildcard points
@@ -185,7 +188,38 @@ def calculate_points(prediction: models.Prediction, result: models.RaceResult) -
     if prediction.sprint_biggest_gainer == result.sprint_biggest_gainer:
         points += 5
     
+    # Winner prediction points
+    if prediction.race_winner == result.p1_driver:
+        points += 50
+    if prediction.constructor_winner == result.p1_constructor:
+        points += 25
+    
     return points
+
+def handle_missing_prediction(predictions: List[models.Prediction], results: List[models.RaceResult]) -> float:
+    """Handle cases where a user didn't submit predictions."""
+    if not predictions:
+        # Find the lowest score among other players
+        lowest_score = min([calculate_points(p, r) for p, r in zip(predictions, results)])
+        return lowest_score - 5
+    return 0.0
+
+def validate_prediction(prediction: models.Prediction, race: models.Race) -> bool:
+    """Validate if the prediction is valid based on the rules."""
+    # Check if all required predictions are present
+    required_fields = [
+        'p1_driver', 'p2_driver', 'p3_driver', 'p10_driver', 'p11_driver',
+        'p19_driver', 'p20_driver', 'p1_constructor', 'p2_constructor',
+        'p5_constructor', 'p6_constructor', 'p10_constructor',
+        'biggest_loser', 'sprint_biggest_loser', 'sprint_biggest_gainer',
+        'race_winner', 'constructor_winner'
+    ]
+    
+    for field in required_fields:
+        if not getattr(prediction, field, None):
+            return False
+    
+    return True
 
 # Page config
 st.set_page_config(
@@ -280,7 +314,7 @@ def show_predictions():
     # Get selected race details
     selected_race = next(race for race in races if f"{race['name']} ({race['date']})" == selected_race_name)
     
-    # Display race details in a cleaner format
+    # Display race details
     st.markdown(f"""
         ### {selected_race['name']}
         **Circuit:** {selected_race['circuit']}  
@@ -289,83 +323,106 @@ def show_predictions():
     """)
     st.markdown("---")
     
-    # Driver predictions
-    st.markdown("### Driver Predictions")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### Top 3")
-        p1 = st.selectbox("1st Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-        p2 = st.selectbox("2nd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-        p3 = st.selectbox("3rd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-    
-    with col2:
-        st.markdown("#### Other Positions")
-        p4 = st.selectbox("4th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-        p5 = st.selectbox("5th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-        p6 = st.selectbox("6th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-    
-    # Constructor predictions
-    st.markdown("### Constructor Predictions")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### Top 3")
-        c1 = st.selectbox("1st Place", options=constructors, format_func=lambda x: x['name'])
-        c2 = st.selectbox("2nd Place", options=constructors, format_func=lambda x: x['name'])
-        c3 = st.selectbox("3rd Place", options=constructors, format_func=lambda x: x['name'])
-    
-    with col2:
-        st.markdown("#### Other Positions")
-        c4 = st.selectbox("4th Place", options=constructors, format_func=lambda x: x['name'])
-        c5 = st.selectbox("5th Place", options=constructors, format_func=lambda x: x['name'])
-        c6 = st.selectbox("6th Place", options=constructors, format_func=lambda x: x['name'])
-    
-    # Wildcard predictions
-    st.markdown("### Wildcard Predictions")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fastest_lap = st.selectbox("Fastest Lap", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-    
-    with col2:
-        dnf = st.selectbox("First DNF", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
-    
-    # Submit prediction
-    if st.button("Submit Prediction"):
-        prediction = {
-            'race_id': selected_race['id'],
-            'driver_predictions': {
-                'p1': p1['id'],
-                'p2': p2['id'],
-                'p3': p3['id'],
-                'p4': p4['id'],
-                'p5': p5['id'],
-                'p6': p6['id']
-            },
-            'constructor_predictions': {
-                'c1': c1['id'],
-                'c2': c2['id'],
-                'c3': c3['id'],
-                'c4': c4['id'],
-                'c5': c5['id'],
-                'c6': c6['id']
-            },
-            'wildcard_predictions': {
-                'fastest_lap': fastest_lap['id'],
-                'dnf': dnf['id']
-            }
-        }
+    # Create prediction form
+    with st.form("prediction_form"):
+        # Driver predictions
+        st.markdown("### Driver Predictions")
+        col1, col2 = st.columns(2)
         
-        with Session(engine) as db:
-            new_prediction = models.Prediction(
-                user_id=st.session_state.user.id,
-                race_id=selected_race['id'],
-                predictions=json.dumps(prediction)
-            )
-            db.add(new_prediction)
-            db.commit()
-            st.success("Prediction submitted successfully!")
+        with col1:
+            st.markdown("#### Top 3")
+            p1 = st.selectbox("1st Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            p2 = st.selectbox("2nd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            p3 = st.selectbox("3rd Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        
+        with col2:
+            st.markdown("#### Other Positions")
+            p10 = st.selectbox("10th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            p11 = st.selectbox("11th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            p19 = st.selectbox("19th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            p20 = st.selectbox("20th Place", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        
+        # Constructor predictions
+        st.markdown("### Constructor Predictions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Top 2")
+            c1 = st.selectbox("1st Place Constructor", options=constructors, format_func=lambda x: x['name'])
+            c2 = st.selectbox("2nd Place Constructor", options=constructors, format_func=lambda x: x['name'])
+        
+        with col2:
+            st.markdown("#### Other Positions")
+            c5 = st.selectbox("5th Place Constructor", options=constructors, format_func=lambda x: x['name'])
+            c6 = st.selectbox("6th Place Constructor", options=constructors, format_func=lambda x: x['name'])
+            c10 = st.selectbox("10th Place Constructor", options=constructors, format_func=lambda x: x['name'])
+        
+        # Wildcard predictions
+        st.markdown("### Wildcard Predictions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Race")
+            biggest_loser = st.selectbox("Biggest Loser", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        
+        with col2:
+            st.markdown("#### Sprint (if applicable)")
+            sprint_biggest_loser = st.selectbox("Sprint Biggest Loser", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+            sprint_biggest_gainer = st.selectbox("Sprint Biggest Gainer", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        
+        # Winner predictions
+        st.markdown("### Winner Predictions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            race_winner = st.selectbox("Race Winner", options=drivers, format_func=lambda x: f"{x['name']} (#{x['number']})")
+        
+        with col2:
+            constructor_winner = st.selectbox("Constructor Winner", options=constructors, format_func=lambda x: x['name'])
+        
+        # Submit button
+        submit = st.form_submit_button("Submit Prediction")
+        
+        if submit:
+            # Validate predictions
+            if not all([p1, p2, p3, p10, p11, p19, p20, c1, c2, c5, c6, c10, 
+                       biggest_loser, sprint_biggest_loser, sprint_biggest_gainer,
+                       race_winner, constructor_winner]):
+                st.error("Please fill in all prediction fields")
+                return
+            
+            try:
+                # Create prediction
+                prediction = models.Prediction(
+                    user_id=st.session_state.user.id,
+                    race_id=selected_race['id'],
+                    p1_driver=p1['id'],
+                    p2_driver=p2['id'],
+                    p3_driver=p3['id'],
+                    p10_driver=p10['id'],
+                    p11_driver=p11['id'],
+                    p19_driver=p19['id'],
+                    p20_driver=p20['id'],
+                    p1_constructor=c1['id'],
+                    p2_constructor=c2['id'],
+                    p5_constructor=c5['id'],
+                    p6_constructor=c6['id'],
+                    p10_constructor=c10['id'],
+                    biggest_loser=biggest_loser['id'],
+                    sprint_biggest_loser=sprint_biggest_loser['id'],
+                    sprint_biggest_gainer=sprint_biggest_gainer['id'],
+                    race_winner=race_winner['id'],
+                    constructor_winner=constructor_winner['id']
+                )
+                
+                # Save prediction
+                db = get_db()
+                db.add(prediction)
+                db.commit()
+                st.success("Prediction submitted successfully!")
+                
+            except Exception as e:
+                st.error(f"Error submitting prediction: {str(e)}")
 
 # Leaderboard page
 def show_leaderboard():
